@@ -1446,18 +1446,35 @@
             return result;
         }
 
-        // Fetch data from Google Sheets dengan fallback ke local
+        // Direct CSV fallback for sections not yet in the API proxy
+        const CSV_FALLBACK = {
+            livereport_day4: 'https://docs.google.com/spreadsheets/d/1swK30ithwLM3MSjUC2GW3AraJwPXxjI58jM8f3RVfeU/gviz/tq?tqx=out:csv',
+            penugasan_day4: 'https://docs.google.com/spreadsheets/d/1HrISNhXruYfMzb8oLEuRwXv1K0R4mF7vA2csXvUJloY/gviz/tq?tqx=out:csv'
+        };
+
+        // Fetch data from Google Sheets dengan fallback ke CSV
         async function fetchSheetData(sectionId) {
-            if (!REKAP_API) return null;
-            try {
-                const res = await fetch(`${REKAP_API}?action=data&section=${encodeURIComponent(sectionId)}&token=${encodeURIComponent(getToken())}&t=${Date.now()}`);
-                const json = await res.json();
-                if (!json || json.error || !json.values) return null;
-                return valuesToResult(json.values);
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                return null;
+            // Try API proxy first
+            if (REKAP_API) {
+                try {
+                    const res = await fetch(`${REKAP_API}?action=data&section=${encodeURIComponent(sectionId)}&token=${encodeURIComponent(getToken())}&t=${Date.now()}`);
+                    const json = await res.json();
+                    if (json && !json.error && json.values) return valuesToResult(json.values);
+                } catch (error) {
+                    console.warn('API proxy failed for', sectionId, error);
+                }
             }
+            // Fallback to direct CSV if available
+            if (CSV_FALLBACK[sectionId]) {
+                try {
+                    const res = await fetch(CSV_FALLBACK[sectionId] + '&t=' + Date.now());
+                    const csv = await res.text();
+                    if (csv && csv.trim()) return parseCSV(csv);
+                } catch (error) {
+                    console.error('CSV fallback failed for', sectionId, error);
+                }
+            }
+            return null;
         }
 
         // Show data section
