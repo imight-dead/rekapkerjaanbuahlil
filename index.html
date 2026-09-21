@@ -1347,8 +1347,8 @@
             { id: 'penugasan_day2', title: 'Penugasan Day 2', desc: 'Poster Digital & Video Yel-Yel', available: true },
             { id: 'livereport_day3', title: 'Live Report Day 3', desc: 'Screenshot Story IG Live Report', available: true },
             { id: 'det', title: 'Laporan Kegiatan Eksternal', desc: 'DET - Laporan kegiatan eksternal peserta', available: true },
-            { id: 'livereport_day4', title: 'Live Report Day 4', desc: 'Coming soon...', available: false },
-            { id: 'penugasan_day4', title: 'Penugasan Day 4', desc: 'Coming soon...', available: false },
+            { id: 'livereport_day4', title: 'Live Report Day 4', desc: 'Screenshot Story IG Live Report', available: true },
+            { id: 'penugasan_day4', title: 'Penugasan Day 4', desc: 'Proposal RPK & PPT RPK', available: true },
             { id: 'livereport_day5', title: 'Live Report Day 5', desc: 'Coming soon...', available: false },
             { id: 'penugasan_day5', title: 'Penugasan Day 5', desc: 'Coming soon...', available: false },
             { id: 'livereport_day6', title: 'Live Report Day 6', desc: 'Coming soon...', available: false },
@@ -1566,35 +1566,25 @@
                 console.log('First row _allValues:', data[0]._allValues);
             }
 
+            // Detect column positions from headers
+            const headers = result.headers || [];
+            let namaIdx = 1, nimIdx = 2, kelasIdx = 3, reguIdx = 4;
+            headers.forEach((h, idx) => {
+                const upper = h.toUpperCase();
+                if (upper.includes('NAMA') && !upper.includes('KEGIATAN')) namaIdx = idx;
+                else if (upper.includes('NIM')) nimIdx = idx;
+                else if (upper.includes('KELAS')) kelasIdx = idx;
+                else if (upper.includes('REGU')) reguIdx = idx;
+            });
+
             return data.map((row, idx) => {
                 // Use _allValues array to find data by scanning all cells
                 const allValues = row._allValues || [];
 
-                // For spreadsheet, columns are usually: Timestamp, NAMA LENGKAP, NIM, KELAS, REGU, then links...
-                // Let's use _allValues directly for more reliable parsing
-                let nama = allValues[1] || '';  // Column B = NAMA LENGKAP
-                let nim = allValues[2] || '';   // Column C = NIM
-                let kelas = allValues[3] || ''; // Column D = KELAS
-                let regu = allValues[4] || '';  // Column E = REGU
-
-                // Fallback: scan all columns if above doesn't work
-                if (!nama || !regu) {
-                    Object.keys(row).forEach(key => {
-                        const val = row[key];
-                        if (!val || key === '_allValues') return;
-
-                        const keyUpper = key.toUpperCase();
-                        if (keyUpper.includes('NAMA') && !nama) {
-                            nama = val;
-                        } else if (keyUpper.includes('NIM') && !nim) {
-                            nim = val;
-                        } else if (keyUpper.includes('KELAS') && !kelas) {
-                            kelas = val;
-                        } else if (keyUpper.includes('REGU') && !regu) {
-                            regu = val;
-                        }
-                    });
-                }
+                let nama = allValues[namaIdx] || '';
+                let nim = allValues[nimIdx] || '';
+                let kelas = allValues[kelasIdx] || '';
+                let regu = allValues[reguIdx] || '';
 
                 if (idx < 3) {
                     console.log(`Row ${idx}: nama="${nama}", nim="${nim}", kelas="${kelas}", regu="${regu}"`);
@@ -1668,6 +1658,23 @@
                     // Penugasan Day 2: Poster (drive), Video yel-yel (instagram)
                     processed.poster = driveLinks.length > 0 ? driveLinks[0] : '';
                     processed.yel_yel = igLinks.length > 0 ? igLinks[0] : '';
+                } else if (sectionId === 'penugasan_day4') {
+                    // Penugasan Day 4: Proposal RPK & PPT RPK per legion (pairs of drive links)
+                    // Each legion has 2 columns (Proposal, PPT) starting after REGU
+                    const startCol = reguIdx + 1;
+                    let proposal = '';
+                    let ppt = '';
+                    for (let i = startCol; i < allValues.length; i += 2) {
+                        const p = (allValues[i] || '').trim();
+                        const t = (allValues[i + 1] || '').trim();
+                        if (p || t) {
+                            proposal = p;
+                            ppt = t;
+                            break;
+                        }
+                    }
+                    processed.proposal = proposal;
+                    processed.ppt = ppt;
                 }
 
                 return processed;
@@ -1788,6 +1795,7 @@
                 case 'livereport_day1':
                 case 'livereport_day2':
                 case 'livereport_day3':
+                case 'livereport_day4':
                     return [
                         { key: 'screenshot', label: 'Screenshot Live Report' }
                     ];
@@ -1801,6 +1809,11 @@
                     return [
                         { key: 'poster', label: 'Poster Digital' },
                         { key: 'yel_yel', label: 'Video Yel-Yel' }
+                    ];
+                case 'penugasan_day4':
+                    return [
+                        { key: 'proposal', label: 'Proposal RPK' },
+                        { key: 'ppt', label: 'PPT RPK' }
                     ];
                 default:
                     return [];
