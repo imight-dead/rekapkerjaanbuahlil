@@ -2062,27 +2062,7 @@
             // Preload first song so playback starts instantly (fix delay)
             loadSong(0);
 
-            const startMusic = () => {
-                audio.play().then(() => {
-                    isPlaying = true;
-                    audioBtn.innerHTML = ICON_PAUSE;
-                    audioBtn.setAttribute('aria-label', 'Jeda musik');
-                }).catch(() => {});
-            };
-            window.__startMusic = startMusic;
-
-            // Only play once unlocked. If already authenticated this session,
-            // start on first interaction; otherwise wait for the password gate.
-            if (sessionStorage.getItem('proximiti_auth') === '1') {
-                startMusic();
-                const kick = () => {
-                    if (!isPlaying) startMusic();
-                    document.removeEventListener('pointerdown', kick);
-                    document.removeEventListener('keydown', kick);
-                };
-                document.addEventListener('pointerdown', kick);
-                document.addEventListener('keydown', kick);
-            }
+            window.__startMusic = () => {};
         });
     </script>
 </body>
