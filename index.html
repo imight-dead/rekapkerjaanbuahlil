@@ -1194,6 +1194,7 @@
                 if ((await sha256(input.value)) === HASH) {
                     sessionStorage.setItem('proximiti_auth', '1');
                     sessionStorage.setItem('proximiti_token', input.value);
+                    if (window.prefetchAll) window.prefetchAll();
                     document.body.style.overflow = '';
                     gate.remove();
                 } else {
@@ -1486,7 +1487,15 @@
 
         // Fetch data from Google Sheets dengan fallback ke JSONP
         async function fetchSheetData(sectionId) {
-            // Try API proxy first
+            // Sheets with a known public ID: gviz is ~1s vs ~5-8s for the Apps Script proxy
+            if (SHEET_FALLBACK[sectionId]) {
+                try {
+                    const r = await fetchSheetViaGviz(SHEET_FALLBACK[sectionId]);
+                    if (r && r.data.length) return r;
+                } catch (error) {
+                    console.warn('Gviz failed for', sectionId, error);
+                }
+            }
             if (REKAP_API) {
                 try {
                     const res = await fetch(`${REKAP_API}?action=data&section=${encodeURIComponent(sectionId)}&token=${encodeURIComponent(getToken())}&t=${Date.now()}`);
@@ -1496,15 +1505,26 @@
                     console.warn('API proxy failed for', sectionId, error);
                 }
             }
-            // Fallback to JSONP via Google Visualization API
-            if (SHEET_FALLBACK[sectionId]) {
-                try {
-                    return await fetchSheetViaGviz(SHEET_FALLBACK[sectionId]);
-                } catch (error) {
-                    console.error('Gviz fallback failed for', sectionId, error);
-                }
-            }
             return null;
+        }
+
+        // Cache + de-duplicate in-flight requests so revisiting a section is instant
+        const dataCache = {};
+        const inflight = {};
+        function getSheetData(sectionId) {
+            if (!inflight[sectionId]) {
+                inflight[sectionId] = fetchSheetData(sectionId).then(r => {
+                    if (r && r.data.length) dataCache[sectionId] = r;
+                    return r;
+                }).finally(() => { delete inflight[sectionId]; });
+            }
+            return inflight[sectionId];
+        }
+
+        // Warm the cache for every available section in the background
+        function prefetchAll() {
+            if (sessionStorage.getItem('proximiti_auth') !== '1') return;
+            menuItems.filter(m => m.available && !dataCache[m.id]).forEach(m => getSheetData(m.id));
         }
 
         // Show data section
@@ -1521,6 +1541,14 @@
             const legionSelect = document.getElementById('legion-select');
             legionSelect.innerHTML = '<option value="">--</option>' +
                 legions.map(l => `<option value="${l}">${l}</option>`).join('');
+
+            // Cached? Render immediately, refresh in the background
+            if (dataCache[sectionId]) {
+                await applyResult(dataCache[sectionId], sectionId);
+                startAutoRefresh();
+                loadDataSilent(sectionId);
+                return;
+            }
 
             // Show loading
             document.getElementById('table-container').innerHTML = `
@@ -1551,13 +1579,13 @@
         // Auto-refresh functions
         function startAutoRefresh() {
             stopAutoRefresh(); // Clear existing interval
-            autoRefreshInterval = setInterval(async () => {
-                if (currentSection) {
-                    console.log('Auto-refreshing data...');
-                    await loadDataSilent(currentSection);
+            // Proxy calls take several seconds; skip a tick if the previous one is still running
+            autoRefreshInterval = setInterval(() => {
+                if (currentSection && !document.hidden && !inflight[currentSection]) {
+                    loadDataSilent(currentSection);
                 }
-            }, 5000); // 5 detik
-            console.log('Auto-refresh started (every 5 seconds)');
+            }, 20000); // 20 detik
+            console.log('Auto-refresh started (every 20 seconds)');
         }
 
         function stopAutoRefresh() {
@@ -1570,21 +1598,25 @@
 
         // Load data tanpa loading indicator (untuk auto-refresh)
         async function loadDataSilent(sectionId) {
-            const result = await fetchSheetData(sectionId);
+            const result = await getSheetData(sectionId);
 
-            if (!result || result.data.length === 0) {
-                return; // Don't update if fetch failed
+            if (!result || result.data.length === 0 || currentSection !== sectionId) {
+                return; // Don't update if fetch failed or user moved on
             }
+            await applyResult(result, sectionId);
+        }
 
+        async function applyResult(result, sectionId) {
             rawData = result.data;
             currentData = processData(result, sectionId);
             if (sectionId === 'det') await fetchRekapStatuses();
-            filterByLegion();
+            if (currentSection === sectionId) filterByLegion();
         }
 
         // Load data for section
         async function loadData(sectionId) {
-            const result = await fetchSheetData(sectionId);
+            const result = await getSheetData(sectionId);
+            if (currentSection !== sectionId) return;
 
             if (!result || result.data.length === 0) {
                 document.getElementById('table-container').innerHTML = `
@@ -1597,10 +1629,7 @@
                 return;
             }
 
-            rawData = result.data;
-            currentData = processData(result, sectionId);
-            if (sectionId === 'det') await fetchRekapStatuses();
-            filterByLegion();
+            await applyResult(result, sectionId);
         }
 
         // Process data based on section type
@@ -1614,15 +1643,27 @@
             }
 
             // Detect column positions from headers
+            // Match by header prefix and take the FIRST match only. Upload columns contain text like
+            // "Format: LiveReport_NamaLengkap", so a plain includes('NAMA') would hijack the nama column.
             const headers = result.headers || [];
-            let namaIdx = 1, nimIdx = 2, kelasIdx = 3, reguIdx = 4;
-            headers.forEach((h, idx) => {
-                const upper = h.toUpperCase();
-                if (upper.includes('NAMA') && !upper.includes('KEGIATAN')) namaIdx = idx;
-                else if (upper.includes('NIM')) nimIdx = idx;
-                else if (upper.includes('KELAS')) kelasIdx = idx;
-                else if (upper.includes('REGU')) reguIdx = idx;
-            });
+            const labels = headers.map(h => h.replace(/_COL\d+$/, '').replace(/\s+/g, ' ').trim().toUpperCase());
+            const findCol = (test, fallback) => {
+                const idx = labels.findIndex(test);
+                return idx === -1 ? fallback : idx;
+            };
+            const namaIdx = findCol(l => l.startsWith('NAMA') && !l.includes('KEGIATAN'), 1);
+            const nimIdx = findCol(l => l.startsWith('NIM'), 2);
+            const kelasIdx = findCol(l => l.startsWith('KELAS'), 3);
+            let reguIdx = findCol(l => l.startsWith('REGU') || l.startsWith('LEGION'), 4);
+            // Fallback: if the chosen column doesn't hold legion names, pick the column that does
+            const isLegion = v => /legion/i.test(v || '');
+            const sample = data.slice(0, 20);
+            if (sample.length && !sample.some(r => isLegion((r._allValues || [])[reguIdx]))) {
+                const width = Math.max(...sample.map(r => (r._allValues || []).length));
+                for (let c = 0; c < width; c++) {
+                    if (sample.filter(r => isLegion((r._allValues || [])[c])).length > sample.length / 2) { reguIdx = c; break; }
+                }
+            }
 
             return data.map((row, idx) => {
                 // Use _allValues array to find data by scanning all cells
@@ -1731,7 +1772,7 @@
         // Normalize regu name
         function normalizeRegu(regu) {
             if (!regu) return '';
-            let normalized = regu.trim();
+            let normalized = regu.replace(/\s+/g, ' ').trim();
             // Handle variations like "Nephthys" vs "Nepthys"
             if (normalized.toLowerCase().includes('nephthys')) {
                 normalized = normalized.replace(/nephthys/gi, 'Nepthys');
@@ -1758,8 +1799,8 @@
             // Filter berdasarkan legion yang dipilih
             const legionName = selectedLegion.toLowerCase().replace('legion of ', '');
             const filteredData = currentData.filter(row => {
-                const rowRegu = row.regu.toLowerCase().replace('legion of ', '');
-                return rowRegu.includes(legionName) || legionName.includes(rowRegu);
+                const rowRegu = row.regu.toLowerCase().replace('legion of ', '').trim();
+                return rowRegu && (rowRegu.includes(legionName) || legionName.includes(rowRegu));
             });
 
             console.log('Selected legion:', selectedLegion);
@@ -2056,6 +2097,7 @@
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
             initMenu();
+            prefetchAll();
             initPlaylist();
 
             // Preload first song so playback starts instantly (fix delay)
