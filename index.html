@@ -1349,8 +1349,8 @@
             { id: 'det', title: 'Laporan Kegiatan Eksternal', desc: 'DET - Laporan kegiatan eksternal peserta', available: true },
             { id: 'livereport_day4', title: 'Live Report Day 4', desc: 'Screenshot Story IG Live Report', available: true },
             { id: 'penugasan_day4', title: 'Penugasan Day 4', desc: 'Proposal RPK & PPT RPK', available: true },
-            { id: 'livereport_day5', title: 'Live Report Day 5', desc: 'Coming soon...', available: false },
-            { id: 'penugasan_day5', title: 'Penugasan Day 5', desc: 'Coming soon...', available: false },
+            { id: 'livereport_day5', title: 'Live Report Day 5', desc: 'Screenshot Story IG Live Report', available: true },
+            { id: 'penugasan_day5', title: 'Penugasan Day 5', desc: 'LinkedIn, CV & Dokumentasi', available: true },
             { id: 'livereport_day6', title: 'Live Report Day 6', desc: 'Coming soon...', available: false },
         ];
 
@@ -1449,7 +1449,9 @@
         // Spreadsheet IDs for sections not yet in the API proxy
         const SHEET_FALLBACK = {
             livereport_day4: '1swK30ithwLM3MSjUC2GW3AraJwPXxjI58jM8f3RVfeU',
-            penugasan_day4: '1HrISNhXruYfMzb8oLEuRwXv1K0R4mF7vA2csXvUJloY'
+            penugasan_day4: '1HrISNhXruYfMzb8oLEuRwXv1K0R4mF7vA2csXvUJloY',
+            livereport_day5: '1I-fk1B8XGffrIh2Iz526O3xIIDY2A7zmnAH-f2j3SRw',
+            penugasan_day5: '1gufXBwT5TzNFL_-GO30NNKwKLQupa2OrBMmlzveOgS8'
         };
 
         // JSONP fetch via Google Visualization API (bypasses CORS)
@@ -1763,6 +1765,26 @@
                     }
                     processed.proposal = proposal;
                     processed.ppt = ppt;
+                } else if (sectionId === 'penugasan_day5') {
+                    // Penugasan Day 5: Link LinkedIn, CV, Dokumentasi Pengerjaan per legion (triplets starting after REGU)
+                    const startCol = reguIdx + 1;
+                    let linkedin = '';
+                    let cv = '';
+                    let dokumentasi = '';
+                    for (let i = startCol; i < allValues.length; i += 3) {
+                        const l = (allValues[i] || '').trim();
+                        const c = (allValues[i + 1] || '').trim();
+                        const d = (allValues[i + 2] || '').trim();
+                        if (l || c || d) {
+                            linkedin = l;
+                            cv = c;
+                            dokumentasi = d;
+                            break;
+                        }
+                    }
+                    processed.linkedin = linkedin;
+                    processed.cv = cv;
+                    processed.dokumentasi = dokumentasi;
                 }
 
                 return processed;
@@ -1884,6 +1906,7 @@
                 case 'livereport_day2':
                 case 'livereport_day3':
                 case 'livereport_day4':
+                case 'livereport_day5':
                     return [
                         { key: 'screenshot', label: 'Screenshot Live Report' }
                     ];
@@ -1902,6 +1925,12 @@
                     return [
                         { key: 'proposal', label: 'Proposal RPK' },
                         { key: 'ppt', label: 'PPT RPK' }
+                    ];
+                case 'penugasan_day5':
+                    return [
+                        { key: 'linkedin', label: 'Link LinkedIn' },
+                        { key: 'cv', label: 'CV' },
+                        { key: 'dokumentasi', label: 'Dokumentasi Pengerjaan' }
                     ];
                 default:
                     return [];
@@ -1959,7 +1988,11 @@
             if (!url || url.trim() === '') {
                 return '<span style="opacity: 0.5">-</span>';
             }
-            return `<a href="${url}" target="_blank" class="link-btn">Ini linknya ciks</a>`;
+            let href = url.trim().split(/\s+/)[0];
+            if (!/^https?:\/\//i.test(href)) {
+                href = 'https://' + href;
+            }
+            return `<a href="${href}" target="_blank" class="link-btn">Ini linknya ciks</a>`;
         }
 
         // Audio controls with playlist
